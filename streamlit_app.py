@@ -1,12 +1,12 @@
 # =============================
-# streamlit_app.py（Jリーグ年俸データ専用・平均×表示／外れ値一覧付き・堅牢版）
+# streamlit_app.py（Jリーグ年俸データ専用・平均×表示／外れ値一覧付き・安定版）
 # =============================
 # ・Excel「箱ひげ図.xlsx / 2022J年俸」をアップロード
 # ・列は『チーム』『ポジション』『年齢』『年俸』（＋『順位』『選手名』）を想定
 # ・グループ軸：チーム / ポジション のみ
 # ・外れ値除外（IQR）時に除外された選手一覧を表示（年俸付き）
 # ・箱ひげ図の平均を "×" マーカーで表示
-# ・groupby/apply 後の戻りを必ず DataFrame にし、列存在を検証
+# ・NaNや2次元化などに強い安全対策を実施
 
 import numpy as np
 import pandas as pd
@@ -70,6 +70,9 @@ if "年俸" not in df.columns:
     st.error("『年俸』列が見つかりません。配布ファイルをご確認ください。")
     st.stop()
 
+# 年俸を数値化（文字混入に備える）
+df["年俸"] = pd.to_numeric(df["年俸"], errors="coerce")
+
 # -----------------------------
 # トップ10除外
 # -----------------------------
@@ -83,18 +86,17 @@ else:
 # -----------------------------
 # プロット用データ作成（氏名なども保持）
 # -----------------------------
-cols_keep = [c for c in [group_by, "選手名", "チーム", "ポジション", "年齢", "年俸"] if c in df.columns]
 if group_by not in df.columns:
     st.error(f"『{group_by}』列が見つかりません。配布ファイルの列名をご確認ください。")
     st.stop()
 
+cols_keep = [c for c in [group_by, "選手名", "チーム", "ポジション", "年齢", "年俸"] if c in df.columns]
 work = df[cols_keep].copy()
 work = work.rename(columns={group_by: "グループ", "年俸": "年俸(万円)"})
 
-# グループ列の確認
-if "グループ" not in work.columns:
-    st.error("データに『グループ』列が見つかりません。")
-    st.stop()
+# グループ列・年俸列の型と欠損を安全化
+work["グループ"] = work["グループ"].astype("string").fillna("不明").astype(str)
+work["年俸(万円)"] = pd.to_numeric(work["年俸(万円)"], errors="coerce")
 
 # -----------------------------
 # 外れ値除外（IQR）
@@ -102,11 +104,14 @@ if "グループ" not in work.columns:
 removed_list = []  # 除外された行を貯める
 if remove_outliers:
     def iqr_filter(g: pd.DataFrame) -> pd.DataFrame:
-        y = g["年俸(万円)"].dropna()
+        y = pd.to_numeric(g["年俸(万円)"], errors="coerce").dropna()
         if y.empty:
-            return g.iloc[0:0]
+            # データ不足のグループはそのまま返す
+            return g
         q1, q3 = y.quantile(0.25), y.quantile(0.75)
         iqr = q3 - q1
+        if not np.isfinite(iqr) or iqr == 0:
+            return g
         lo, hi = q1 - 1.5 * iqr, q3 + 1.5 * iqr
         mask = (g["年俸(万円)"] < lo) | (g["年俸(万円)"] > hi)
         removed = g[mask].copy()
@@ -120,9 +125,9 @@ if remove_outliers:
             .apply(iqr_filter)
             .reset_index(drop=True)
     )
-    removed_outliers = pd.concat(removed_list, ignore_index=True) if removed_list else pd.DataFrame()
+    removed_outliers = pd.concat(removed_list, ignore_index=True) if removed_list else pd.DataFrame(columns=["選手名","チーム","ポジション","年齢","年俸(万円)","判定グループ"])
 else:
-    removed_outliers = pd.DataFrame()
+    removed_outliers = pd.DataFrame(columns=["選手名","チーム","ポジション","年齢","年俸(万円)","判定グループ"])
 
 # -----------------------------
 # グループ順の決定（安全化）
@@ -131,15 +136,10 @@ if work.empty or "グループ" not in work.columns:
     st.warning("有効なデータがありません。フィルタ条件やアップロードファイルを確認してください。")
     st.stop()
 
-groups = work["グループ"]
-# すべて欠損かどうか（DataFrame/Seriesの両方に耐える）
-na_all = bool(pd.isna(groups).to_numpy().all())
-if na_all:
-    st.warning("グループ列がすべて欠損です。データを確認してください。")
-    st.stop()
-
-# ユニーク値（NaN除外）を安全に取得
-order = sorted(pd.unique(pd.Series(groups).dropna().astype(str)).tolist())
+# ndarray化して一次元に潰し、NaNを除いて文字列化
+arr = np.asarray(work["グループ"]).ravel()
+arr = [str(x) for x in arr if pd.notna(x)]
+order = sorted(set(arr))
 
 # -----------------------------
 # 箱ひげ図
@@ -192,7 +192,6 @@ st.dataframe(desc, use_container_width=True)
 # -----------------------------
 if remove_outliers and not removed_outliers.empty:
     st.subheader("除外された外れ値一覧（IQR方式）")
-    # 表示列（存在する列のみ）
     show_cols = [c for c in ["選手名", "チーム", "ポジション", "年齢", "年俸(万円)", "判定グループ"] if c in removed_outliers.columns]
     removed_outliers = removed_outliers.sort_values("年俸(万円)", ascending=False)
     st.dataframe(removed_outliers[show_cols], use_container_width=True)

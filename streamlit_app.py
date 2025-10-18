@@ -1,11 +1,12 @@
 # =============================
-# streamlit_app.py（Jリーグ年俸データ専用・平均×表示／外れ値一覧付き）
+# streamlit_app.py（Jリーグ年俸データ専用・平均×表示／外れ値一覧付き・堅牢版）
 # =============================
 # ・Excel「箱ひげ図.xlsx / 2022J年俸」をアップロード
 # ・列は『チーム』『ポジション』『年齢』『年俸』（＋『順位』『選手名』）を想定
 # ・グループ軸：チーム / ポジション のみ
-# ・外れ値除外（IQR）時に除外された選手一覧を表示
+# ・外れ値除外（IQR）時に除外された選手一覧を表示（年俸付き）
 # ・箱ひげ図の平均を "×" マーカーで表示
+# ・groupby/apply 後の戻りを必ず DataFrame にし、列存在を検証
 
 import numpy as np
 import pandas as pd
@@ -83,13 +84,22 @@ else:
 # プロット用データ作成（氏名なども保持）
 # -----------------------------
 cols_keep = [c for c in [group_by, "選手名", "チーム", "ポジション", "年齢", "年俸"] if c in df.columns]
+if group_by not in df.columns:
+    st.error(f"『{group_by}』列が見つかりません。配布ファイルの列名をご確認ください。")
+    st.stop()
+
 work = df[cols_keep].copy()
 work = work.rename(columns={group_by: "グループ", "年俸": "年俸(万円)"})
+
+# グループ列の確認
+if "グループ" not in work.columns:
+    st.error("データに『グループ』列が見つかりません。")
+    st.stop()
 
 # -----------------------------
 # 外れ値除外（IQR）
 # -----------------------------
-removed_list = []  # nonlocal を使わず、リストに貯める
+removed_list = []  # 除外された行を貯める
 if remove_outliers:
     def iqr_filter(g: pd.DataFrame) -> pd.DataFrame:
         y = g["年俸(万円)"].dropna()
@@ -105,17 +115,28 @@ if remove_outliers:
             removed_list.append(removed)
         return g[~mask]
 
-    work = work.groupby("グループ", dropna=False, group_keys=False).apply(iqr_filter)
+    work = (
+        work.groupby("グループ", dropna=False, group_keys=False)
+            .apply(iqr_filter)
+            .reset_index(drop=True)
+    )
     removed_outliers = pd.concat(removed_list, ignore_index=True) if removed_list else pd.DataFrame()
 else:
     removed_outliers = pd.DataFrame()
 
 # -----------------------------
+# グループ順の決定（安全化）
+# -----------------------------
+if work.empty or "グループ" not in work.columns:
+    st.warning("有効なデータがありません。フィルタ条件やアップロードファイルを確認してください。")
+    st.stop()
+
+order = sorted(pd.Series(work["グループ"], dtype="string").dropna().unique().tolist())
+
+# -----------------------------
 # 箱ひげ図
 # -----------------------------
 points_mode = "outliers" if show_points else False
-order = sorted(work["グループ"].astype(str).unique())
-
 fig = px.box(
     work,
     x="グループ",
@@ -132,18 +153,19 @@ fig.update_layout(
 
 # 平均値を×マーカーで表示
 means = work.groupby("グループ")["年俸(万円)"].mean().reset_index()
-fig.add_trace(
-    go.Scatter(
-        x=means["グループ"].astype(str),
-        y=means["年俸(万円)"],
-        mode="markers",
-        marker_symbol="x",
-        marker_size=12,
-        name="平均",
-        hovertemplate="%{x}<br>平均=%{y}<extra></extra>",
-        showlegend=True,
+if not means.empty:
+    fig.add_trace(
+        go.Scatter(
+            x=means["グループ"].astype(str),
+            y=means["年俸(万円)"],
+            mode="markers",
+            marker_symbol="x",
+            marker_size=12,
+            name="平均",
+            hovertemplate="%{x}<br>平均=%{y}<extra></extra>",
+            showlegend=True,
+        )
     )
-)
 
 st.plotly_chart(fig, use_container_width=True)
 
@@ -162,12 +184,13 @@ st.dataframe(desc, use_container_width=True)
 # -----------------------------
 if remove_outliers and not removed_outliers.empty:
     st.subheader("除外された外れ値一覧（IQR方式）")
-    cols = [c for c in ["選手名", "チーム", "ポジション", "年齢", "年俸(万円)", "判定グループ"] if c in removed_outliers.columns]
+    # 表示列（存在する列のみ）
+    show_cols = [c for c in ["選手名", "チーム", "ポジション", "年齢", "年俸(万円)", "判定グループ"] if c in removed_outliers.columns]
     removed_outliers = removed_outliers.sort_values("年俸(万円)", ascending=False)
-    st.dataframe(removed_outliers[cols], use_container_width=True)
+    st.dataframe(removed_outliers[show_cols], use_container_width=True)
     st.download_button(
         label="除外された外れ値一覧をCSVで保存",
-        data=removed_outliers.to_csv(index=False).encode("utf-8-sig"),
+        data=removed_outliers[show_cols].to_csv(index=False).encode("utf-8-sig"),
         file_name="removed_outliers.csv",
         mime="text/csv",
     )

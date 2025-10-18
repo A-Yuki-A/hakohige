@@ -32,12 +32,13 @@ with st.sidebar:
         index=0,
     )
     remove_outliers = st.checkbox(
-        "外れ値を除外（IQR方式）",
+        "各チームの外れ値を除外（IQR方式）",
         value=False,
         help=(
             "IQR（四分位範囲）法とは、データの中央50%の範囲（Q1〜Q3）を基準に、"
             "Q1−1.5×IQRより小さい値やQ3+1.5×IQRより大きい値を外れ値として除外する方法です。"
         ),
+    ),
     )
     show_points = st.checkbox("外れ値点を描画", value=True)
     exclude_top10 = st.checkbox("年俸の高い上位10人を除外して表示", value=False)
@@ -99,7 +100,7 @@ work["グループ"] = work["グループ"].astype("string").fillna("不明").as
 work["年俸(万円)"] = pd.to_numeric(work["年俸(万円)"], errors="coerce")
 
 # -----------------------------
-# 外れ値除外（IQR）
+# 外れ値除外（IQR） - 判定は基本「各チーム」単位で実施
 # -----------------------------
 removed_list = []
 if remove_outliers:
@@ -119,10 +120,12 @@ if remove_outliers:
             removed_list.append(removed)
         return g[~mask]
 
+    # 基本は『チーム』ごとに判定。『チーム』列が無い場合のみ表示グループで判定。
+    group_on = "チーム" if ("チーム" in work.columns and group_by != "チーム") else "グループ"
     work = (
-        work.groupby("グループ", dropna=False, group_keys=False)
-        .apply(iqr_filter)
-        .reset_index(drop=True)
+        work.groupby(group_on, dropna=False, group_keys=False)
+            .apply(iqr_filter)
+            .reset_index(drop=True)
     )
     removed_outliers = pd.concat(removed_list, ignore_index=True) if removed_list else pd.DataFrame()
 else:
@@ -177,6 +180,11 @@ if not means.empty:
     )
 
 st.plotly_chart(fig, use_container_width=True)
+
+# 箱ひげ図の下に説明文を表示
+st.markdown(
+    "※ IQR（四分位範囲）法：データの中央50%の範囲（Q1〜Q3）を基準に、Q1−1.5×IQRより小さい値やQ3+1.5×IQRより大きい値を外れ値とみなします。 外れ値除外をONにすると、この範囲外の値を除いて箱ひげ図を描き、除外された選手の一覧を表示します。"
+)
 
 # -----------------------------
 # グループ別の要約統計

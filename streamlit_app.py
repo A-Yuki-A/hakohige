@@ -23,7 +23,7 @@ st.caption("Excel『箱ひげ図.xlsx』をアップロードし、チームや�
 with st.sidebar:
     st.header("1) ファイルの読み込み")
     st.write("配布した Excel ファイル（箱ひげ図.xlsx）をアップロードしてください。")
-    file = st.file_uploader("箱ひげ図.xlsx を選択", type=["xlsx"]) 
+    file = st.file_uploader("箱ひげ図.xlsx を選択", type=["xlsx"])
 
     st.header("2) 表示設定")
     group_by = st.selectbox(
@@ -37,8 +37,7 @@ with st.sidebar:
         help=(
             "IQR（四分位範囲）法とは、データの中央50%の範囲（Q1〜Q3）を基準に、"
             "Q1−1.5×IQRより小さい値やQ3+1.5×IQRより大きい値を外れ値として除外する方法です。"
-        ),
-    ),
+        )
     )
     show_points = st.checkbox("外れ値点を描画", value=True)
     exclude_top10 = st.checkbox("年俸の高い上位10人を除外して表示", value=False)
@@ -77,7 +76,7 @@ df["年俸"] = pd.to_numeric(df["年俸"], errors="coerce")
 # -----------------------------
 if exclude_top10:
     top10_idx = df["年俸"].nlargest(10).index
-    excluded_top10_df = df.loc[top10_idx, [c for c in ["順位","選手名", "チーム", "ポジション", "年齢", "年俸"] if c in df.columns]]
+    excluded_top10_df = df.loc[top10_idx, [c for c in ["順位", "選手名", "チーム", "ポジション", "年齢", "年俸"] if c in df.columns]]
     df = df.drop(index=top10_idx)
 else:
     excluded_top10_df = None
@@ -100,7 +99,7 @@ work["グループ"] = work["グループ"].astype("string").fillna("不明").as
 work["年俸(万円)"] = pd.to_numeric(work["年俸(万円)"], errors="coerce")
 
 # -----------------------------
-# 外れ値除外（IQR） - 判定は基本「各チーム」単位で実施
+# 外れ値除外（IQR） - 各チーム単位
 # -----------------------------
 removed_list = []
 if remove_outliers:
@@ -120,12 +119,11 @@ if remove_outliers:
             removed_list.append(removed)
         return g[~mask]
 
-    # 基本は『チーム』ごとに判定。『チーム』列が無い場合のみ表示グループで判定。
     group_on = "チーム" if ("チーム" in work.columns and group_by != "チーム") else "グループ"
     work = (
         work.groupby(group_on, dropna=False, group_keys=False)
-            .apply(iqr_filter)
-            .reset_index(drop=True)
+        .apply(iqr_filter)
+        .reset_index(drop=True)
     )
     removed_outliers = pd.concat(removed_list, ignore_index=True) if removed_list else pd.DataFrame()
 else:
@@ -153,7 +151,6 @@ fig = px.box(
     points=points_mode,
     category_orders={"グループ": order},
 )
-# 箱の塗りを白に変更
 fig.update_traces(fillcolor="white", line_color="black")
 fig.update_layout(
     xaxis_title=group_by,
@@ -162,7 +159,6 @@ fig.update_layout(
     boxmode="group",
 )
 
-# 平均値を濃い青の×マーカーで表示
 means = work.groupby("グループ")["年俸(万円)"].mean().reset_index()
 if not means.empty:
     fig.add_trace(
@@ -197,7 +193,7 @@ desc = work.groupby("グループ")["年俸(万円)"].describe().rename(columns=
 st.dataframe(desc, use_container_width=True)
 
 # -----------------------------
-# 除外された外れ値一覧（チェックON時）
+# 除外された外れ値一覧
 # -----------------------------
 if remove_outliers and not removed_outliers.empty:
     st.subheader("除外された外れ値一覧（IQR方式）")
@@ -212,17 +208,12 @@ if remove_outliers and not removed_outliers.empty:
     )
 
 # -----------------------------
-# 除外された上位10人の表示
+# 除外された上位10人
 # -----------------------------
 if excluded_top10_df is not None and not excluded_top10_df.empty:
     st.subheader("除外された上位10人（年俸が高い順）")
     excluded_top10_df = excluded_top10_df.sort_values("年俸", ascending=False)
     st.dataframe(excluded_top10_df, use_container_width=True)
-
-st.caption(
-    "※ IQR（四分位範囲）法：データの中央50%の範囲（Q1〜Q3）を基準に、Q1−1.5×IQRより小さい値やQ3+1.5×IQRより大きい値を外れ値とみなします。\n"
-    "外れ値除外をONにすると、この範囲外の値を除いて箱ひげ図を描き、除外された選手の一覧を表示します。"
-)
 
 # =============================
 # requirements.txt

@@ -6,6 +6,7 @@
 # ・グループ軸：チーム / ポジション のみ
 # ・外れ値除外（IQR）時に除外された選手一覧を表示（年俸付き）
 # ・箱ひげ図の内部は白塗り、平均を濃い青の"×"で表示
+# ・外れ値点は常に表示
 
 import numpy as np
 import pandas as pd
@@ -39,8 +40,7 @@ with st.sidebar:
             "Q1−1.5×IQRより小さい値やQ3+1.5×IQRより大きい値を外れ値として除外する方法です。"
         )
     )
-    show_points = st.checkbox("外れ値点を描画", value=True)
-    exclude_top10 = st.checkbox("年俸の高い上位10人を除外して表示", value=False)
+    exclude_top10 = st.checkbox("全体の上位10位を除外して表示", value=False)
 
 if file is None:
     st.info("左のサイドバーから Excel ファイルをアップロードしてください。想定列: 『順位』『選手名』『年齢』『ポジション』『チーム』『年俸』。")
@@ -72,7 +72,7 @@ if "年俸" not in df.columns:
 df["年俸"] = pd.to_numeric(df["年俸"], errors="coerce")
 
 # -----------------------------
-# トップ10除外
+# 全体の上位10位を除外
 # -----------------------------
 if exclude_top10:
     top10_idx = df["年俸"].nlargest(10).index
@@ -141,14 +141,13 @@ arr = [str(x) for x in arr if pd.notna(x)]
 order = sorted(set(arr))
 
 # -----------------------------
-# 箱ひげ図（白塗り、×は濃青）
+# 箱ひげ図（白塗り、×は濃青・外れ値常時表示）
 # -----------------------------
-points_mode = "outliers" if show_points else False
 fig = px.box(
     work,
     x="グループ",
     y="年俸(万円)",
-    points=points_mode,
+    points="outliers",
     category_orders={"グループ": order},
 )
 fig.update_traces(fillcolor="white", line_color="black")
@@ -208,10 +207,10 @@ if remove_outliers and not removed_outliers.empty:
     )
 
 # -----------------------------
-# 除外された上位10人
+# 除外された全体上位10位
 # -----------------------------
 if excluded_top10_df is not None and not excluded_top10_df.empty:
-    st.subheader("除外された上位10人（年俸が高い順）")
+    st.subheader("除外された全体の上位10位（年俸が高い順）")
     excluded_top10_df = excluded_top10_df.sort_values("年俸", ascending=False)
     st.dataframe(excluded_top10_df, use_container_width=True)
 

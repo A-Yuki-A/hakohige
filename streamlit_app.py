@@ -132,10 +132,14 @@ if work.empty or "グループ" not in work.columns:
     st.stop()
 
 groups = work["グループ"]
-if groups.isna().all():
+# すべて欠損かどうか（DataFrame/Seriesの両方に耐える）
+na_all = bool(pd.isna(groups).to_numpy().all())
+if na_all:
     st.warning("グループ列がすべて欠損です。データを確認してください。")
     st.stop()
-order = sorted(pd.unique(groups.dropna().astype(str)).tolist())
+
+# ユニーク値（NaN除外）を安全に取得
+order = sorted(pd.unique(pd.Series(groups).dropna().astype(str)).tolist())
 
 # -----------------------------
 # 箱ひげ図

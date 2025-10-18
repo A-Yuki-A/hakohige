@@ -80,15 +80,16 @@ else:
     excluded_top10_df = None
 
 # -----------------------------
-# プロット用データ作成
+# プロット用データ作成（氏名なども保持）
 # -----------------------------
-work = df[[group_by, "年俸"]].copy()
+cols_keep = [c for c in [group_by, "選手名", "チーム", "ポジション", "年齢", "年俸"] if c in df.columns]
+work = df[cols_keep].copy()
 work = work.rename(columns={group_by: "グループ", "年俸": "年俸(万円)"})
 
 # -----------------------------
 # 外れ値除外（IQR）
 # -----------------------------
-removed_outliers = pd.DataFrame()
+removed_list = []  # nonlocal を使わず、リストに貯める
 if remove_outliers:
     def iqr_filter(g: pd.DataFrame) -> pd.DataFrame:
         y = g["年俸(万円)"].dropna()
@@ -101,11 +102,13 @@ if remove_outliers:
         removed = g[mask].copy()
         if not removed.empty:
             removed["判定グループ"] = g.name
-            nonlocal removed_outliers
-            removed_outliers = pd.concat([removed_outliers, removed])
+            removed_list.append(removed)
         return g[~mask]
 
     work = work.groupby("グループ", dropna=False, group_keys=False).apply(iqr_filter)
+    removed_outliers = pd.concat(removed_list, ignore_index=True) if removed_list else pd.DataFrame()
+else:
+    removed_outliers = pd.DataFrame()
 
 # -----------------------------
 # 箱ひげ図

@@ -131,7 +131,11 @@ if work.empty or "グループ" not in work.columns:
     st.warning("有効なデータがありません。フィルタ条件やアップロードファイルを確認してください。")
     st.stop()
 
-order = sorted(pd.Series(work["グループ"], dtype="string").dropna().unique().tolist())
+groups = work["グループ"]
+if groups.isna().all():
+    st.warning("グループ列がすべて欠損です。データを確認してください。")
+    st.stop()
+order = sorted(pd.unique(groups.dropna().astype(str)).tolist())
 
 # -----------------------------
 # 箱ひげ図

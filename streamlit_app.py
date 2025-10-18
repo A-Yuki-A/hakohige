@@ -90,13 +90,24 @@ if group_by not in df.columns:
     st.error(f"『{group_by}』列が見つかりません。配布ファイルの列名をご確認ください。")
     st.stop()
 
-cols_keep = [c for c in [group_by, "選手名", "チーム", "ポジション", "年齢", "年俸"] if c in df.columns]
+# 重複カラムを避けるため、グループ列は先頭に1回だけ入れ、他と重ならないようにする
+other_candidates = ["選手名", "チーム", "ポジション", "年齢", "年俸"]
+others = [c for c in other_candidates if (c in df.columns and c != group_by)]
+cols_keep = [group_by] + others
+
 work = df[cols_keep].copy()
 work = work.rename(columns={group_by: "グループ", "年俸": "年俸(万円)"})
 
+# 万が一の重複カラム名に備えて除去
+work = work.loc[:, ~work.columns.duplicated()]
+
 # グループ列・年俸列の型と欠損を安全化
 work["グループ"] = work["グループ"].astype("string").fillna("不明").astype(str)
-work["年俸(万円)"] = pd.to_numeric(work["年俸(万円)"], errors="coerce")
+if "年俸(万円)" in work.columns:
+    work["年俸(万円)"] = pd.to_numeric(work["年俸(万円)"], errors="coerce")
+else:
+    st.error("『年俸』列が見つかりません。配布ファイルをご確認ください。")
+    st.stop()
 
 # -----------------------------
 # 外れ値除外（IQR）

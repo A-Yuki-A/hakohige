@@ -1,12 +1,11 @@
 # =============================
-# streamlit_app.py（Jリーグ年俸データ専用・平均×表示／外れ値一覧付き・安定版）
+# streamlit_app.py（Jリーグ年俸データ専用・平均×表示／外れ値一覧付き・白箱＋濃青×）
 # =============================
 # ・Excel「箱ひげ図.xlsx / 2022J年俸」をアップロード
 # ・列は『チーム』『ポジション』『年齢』『年俸』（＋『順位』『選手名』）を想定
 # ・グループ軸：チーム / ポジション のみ
 # ・外れ値除外（IQR）時に除外された選手一覧を表示（年俸付き）
-# ・箱ひげ図の平均を "×" マーカーで表示
-# ・NaNや2次元化などに強い安全対策を実施
+# ・箱ひげ図の内部は白塗り、平均を濃い青の"×"で表示
 
 import numpy as np
 import pandas as pd
@@ -70,7 +69,6 @@ if "年俸" not in df.columns:
     st.error("『年俸』列が見つかりません。配布ファイルをご確認ください。")
     st.stop()
 
-# 年俸を数値化（文字混入に備える）
 df["年俸"] = pd.to_numeric(df["年俸"], errors="coerce")
 
 # -----------------------------
@@ -84,40 +82,30 @@ else:
     excluded_top10_df = None
 
 # -----------------------------
-# プロット用データ作成（氏名なども保持）
+# プロット用データ作成
 # -----------------------------
 if group_by not in df.columns:
     st.error(f"『{group_by}』列が見つかりません。配布ファイルの列名をご確認ください。")
     st.stop()
 
-# 重複カラムを避けるため、グループ列は先頭に1回だけ入れ、他と重ならないようにする
 other_candidates = ["選手名", "チーム", "ポジション", "年齢", "年俸"]
 others = [c for c in other_candidates if (c in df.columns and c != group_by)]
 cols_keep = [group_by] + others
 
 work = df[cols_keep].copy()
 work = work.rename(columns={group_by: "グループ", "年俸": "年俸(万円)"})
-
-# 万が一の重複カラム名に備えて除去
 work = work.loc[:, ~work.columns.duplicated()]
-
-# グループ列・年俸列の型と欠損を安全化
 work["グループ"] = work["グループ"].astype("string").fillna("不明").astype(str)
-if "年俸(万円)" in work.columns:
-    work["年俸(万円)"] = pd.to_numeric(work["年俸(万円)"], errors="coerce")
-else:
-    st.error("『年俸』列が見つかりません。配布ファイルをご確認ください。")
-    st.stop()
+work["年俸(万円)"] = pd.to_numeric(work["年俸(万円)"], errors="coerce")
 
 # -----------------------------
 # 外れ値除外（IQR）
 # -----------------------------
-removed_list = []  # 除外された行を貯める
+removed_list = []
 if remove_outliers:
     def iqr_filter(g: pd.DataFrame) -> pd.DataFrame:
         y = pd.to_numeric(g["年俸(万円)"], errors="coerce").dropna()
         if y.empty:
-            # データ不足のグループはそのまま返す
             return g
         q1, q3 = y.quantile(0.25), y.quantile(0.75)
         iqr = q3 - q1
@@ -133,27 +121,26 @@ if remove_outliers:
 
     work = (
         work.groupby("グループ", dropna=False, group_keys=False)
-            .apply(iqr_filter)
-            .reset_index(drop=True)
+        .apply(iqr_filter)
+        .reset_index(drop=True)
     )
-    removed_outliers = pd.concat(removed_list, ignore_index=True) if removed_list else pd.DataFrame(columns=["選手名","チーム","ポジション","年齢","年俸(万円)","判定グループ"])
+    removed_outliers = pd.concat(removed_list, ignore_index=True) if removed_list else pd.DataFrame()
 else:
-    removed_outliers = pd.DataFrame(columns=["選手名","チーム","ポジション","年齢","年俸(万円)","判定グループ"])
+    removed_outliers = pd.DataFrame()
 
 # -----------------------------
-# グループ順の決定（安全化）
+# グループ順の決定
 # -----------------------------
 if work.empty or "グループ" not in work.columns:
     st.warning("有効なデータがありません。フィルタ条件やアップロードファイルを確認してください。")
     st.stop()
 
-# ndarray化して一次元に潰し、NaNを除いて文字列化
 arr = np.asarray(work["グループ"]).ravel()
 arr = [str(x) for x in arr if pd.notna(x)]
 order = sorted(set(arr))
 
 # -----------------------------
-# 箱ひげ図
+# 箱ひげ図（白塗り、×は濃青）
 # -----------------------------
 points_mode = "outliers" if show_points else False
 fig = px.box(
@@ -163,6 +150,8 @@ fig = px.box(
     points=points_mode,
     category_orders={"グループ": order},
 )
+# 箱の塗りを白に変更
+fig.update_traces(fillcolor="white", line_color="black")
 fig.update_layout(
     xaxis_title=group_by,
     yaxis_title="年俸(万円)",
@@ -170,7 +159,7 @@ fig.update_layout(
     boxmode="group",
 )
 
-# 平均値を×マーカーで表示
+# 平均値を濃い青の×マーカーで表示
 means = work.groupby("グループ")["年俸(万円)"].mean().reset_index()
 if not means.empty:
     fig.add_trace(
@@ -180,6 +169,7 @@ if not means.empty:
             mode="markers",
             marker_symbol="x",
             marker_size=12,
+            marker_color="blue",
             name="平均",
             hovertemplate="%{x}<br>平均=%{y}<extra></extra>",
             showlegend=True,

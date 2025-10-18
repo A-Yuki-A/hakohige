@@ -1,12 +1,11 @@
 # =============================
-# streamlit_app.py（Jリーグ年俸データ専用・チーム/ポジション版）
+# streamlit_app.py（Jリーグ年俸データ専用・平均×表示／外れ値一覧付き）
 # =============================
-# ・配布Excel「箱ひげ図.xlsx / 2022J年俸」をアップロード
+# ・Excel「箱ひげ図.xlsx / 2022J年俸」をアップロード
 # ・列は『チーム』『ポジション』『年齢』『年俸』（＋『順位』『選手名』）を想定
-# ・グループ軸：チーム / ポジション のみ（年齢帯は除外）
-# ・外れ値除外（IQR）チェック → IQR法の説明を追加
-# ・トップ10高額年俸を除外してプロット（除外された10人の一覧を表示）
-# ・箱ひげ図の中央値を "×" マーカーで表示
+# ・グループ軸：チーム / ポジション のみ
+# ・外れ値除外（IQR）時に除外された選手一覧を表示
+# ・箱ひげ図の平均を "×" マーカーで表示
 
 import numpy as np
 import pandas as pd
@@ -32,8 +31,14 @@ with st.sidebar:
         ["チーム", "ポジション"],
         index=0,
     )
-    remove_outliers = st.checkbox("外れ値を除外（IQR方式）", value=False,
-        help="IQR（四分位範囲）法とは、データの中央50%の範囲を基準にして極端に離れた値を外れ値として除外する方法です。")
+    remove_outliers = st.checkbox(
+        "外れ値を除外（IQR方式）",
+        value=False,
+        help=(
+            "IQR（四分位範囲）法とは、データの中央50%の範囲（Q1〜Q3）を基準に、"
+            "Q1−1.5×IQRより小さい値やQ3+1.5×IQRより大きい値を外れ値として除外する方法です。"
+        ),
+    )
     show_points = st.checkbox("外れ値点を描画", value=True)
     exclude_top10 = st.checkbox("年俸の高い上位10人を除外して表示", value=False)
 
@@ -42,7 +47,7 @@ if file is None:
     st.stop()
 
 # -----------------------------
-# 読み込み（固定シート名）
+# データ読み込み
 # -----------------------------
 try:
     df = pd.read_excel(file, sheet_name="2022J年俸")
@@ -51,7 +56,7 @@ except Exception as e:
     st.stop()
 
 # -----------------------------
-# 前処理：不要列削除、型整備
+# 前処理
 # -----------------------------
 for col in ["Unnamed: 0"]:
     if col in df.columns:
@@ -65,7 +70,7 @@ if "年俸" not in df.columns:
     st.stop()
 
 # -----------------------------
-# トップ10除外（年俸が高い順）
+# トップ10除外
 # -----------------------------
 if exclude_top10:
     top10_idx = df["年俸"].nlargest(10).index
@@ -75,14 +80,15 @@ else:
     excluded_top10_df = None
 
 # -----------------------------
-# プロット用データ
+# プロット用データ作成
 # -----------------------------
 work = df[[group_by, "年俸"]].copy()
 work = work.rename(columns={group_by: "グループ", "年俸": "年俸(万円)"})
 
 # -----------------------------
-# 外れ値除外（IQR方式）
+# 外れ値除外（IQR）
 # -----------------------------
+removed_outliers = pd.DataFrame()
 if remove_outliers:
     def iqr_filter(g: pd.DataFrame) -> pd.DataFrame:
         y = g["年俸(万円)"].dropna()
@@ -90,10 +96,15 @@ if remove_outliers:
             return g.iloc[0:0]
         q1, q3 = y.quantile(0.25), y.quantile(0.75)
         iqr = q3 - q1
-        if not np.isfinite(iqr) or iqr == 0:
-            return g
         lo, hi = q1 - 1.5 * iqr, q3 + 1.5 * iqr
-        return g[(g["年俸(万円)"] >= lo) & (g["年俸(万円)"] <= hi)]
+        mask = (g["年俸(万円)"] < lo) | (g["年俸(万円)"] > hi)
+        removed = g[mask].copy()
+        if not removed.empty:
+            removed["判定グループ"] = g.name
+            nonlocal removed_outliers
+            removed_outliers = pd.concat([removed_outliers, removed])
+        return g[~mask]
+
     work = work.groupby("グループ", dropna=False, group_keys=False).apply(iqr_filter)
 
 # -----------------------------
@@ -116,17 +127,17 @@ fig.update_layout(
     boxmode="group",
 )
 
-# 中央値 "×" マーカーの重ね描き
-medians = work.groupby("グループ")["年俸(万円)"].median().reset_index()
+# 平均値を×マーカーで表示
+means = work.groupby("グループ")["年俸(万円)"].mean().reset_index()
 fig.add_trace(
     go.Scatter(
-        x=medians["グループ"].astype(str),
-        y=medians["年俸(万円)"],
+        x=means["グループ"].astype(str),
+        y=means["年俸(万円)"],
         mode="markers",
         marker_symbol="x",
         marker_size=12,
-        name="中央値",
-        hovertemplate="%{x}<br>中央値=%{y}<extra></extra>",
+        name="平均",
+        hovertemplate="%{x}<br>平均=%{y}<extra></extra>",
         showlegend=True,
     )
 )
@@ -144,14 +155,32 @@ desc = work.groupby("グループ")["年俸(万円)"].describe().rename(columns=
 st.dataframe(desc, use_container_width=True)
 
 # -----------------------------
-# 除外された上位10人の表示（チェックON時）
+# 除外された外れ値一覧（チェックON時）
+# -----------------------------
+if remove_outliers and not removed_outliers.empty:
+    st.subheader("除外された外れ値一覧（IQR方式）")
+    cols = [c for c in ["選手名", "チーム", "ポジション", "年齢", "年俸(万円)", "判定グループ"] if c in removed_outliers.columns]
+    removed_outliers = removed_outliers.sort_values("年俸(万円)", ascending=False)
+    st.dataframe(removed_outliers[cols], use_container_width=True)
+    st.download_button(
+        label="除外された外れ値一覧をCSVで保存",
+        data=removed_outliers.to_csv(index=False).encode("utf-8-sig"),
+        file_name="removed_outliers.csv",
+        mime="text/csv",
+    )
+
+# -----------------------------
+# 除外された上位10人の表示
 # -----------------------------
 if excluded_top10_df is not None and not excluded_top10_df.empty:
     st.subheader("除外された上位10人（年俸が高い順）")
     excluded_top10_df = excluded_top10_df.sort_values("年俸", ascending=False)
     st.dataframe(excluded_top10_df, use_container_width=True)
 
-st.caption("※ IQR（四分位範囲）法：データの中央50%の範囲（Q1～Q3）を基準に、\nQ1-1.5×IQRより小さい値やQ3+1.5×IQRより大きい値を外れ値とみなします。\n外れ値除外をONにすると、この範囲外の値を除いて箱ひげ図を描きます。")
+st.caption(
+    "※ IQR（四分位範囲）法：データの中央50%の範囲（Q1〜Q3）を基準に、Q1−1.5×IQRより小さい値やQ3+1.5×IQRより大きい値を外れ値とみなします。\n"
+    "外れ値除外をONにすると、この範囲外の値を除いて箱ひげ図を描き、除外された選手の一覧を表示します。"
+)
 
 # =============================
 # requirements.txt

@@ -1,7 +1,7 @@
 # =============================
 # streamlit_app.py（Jリーグ年俸データ専用・平均×表示／外れ値一覧付き・白箱＋濃青×）
 # =============================
-# ・Excel「箱ひげ図.xlsx / 2022J年俸」をアップロード
+# ・Excel「Jリーグ年俸.xlsx / 2022J年俸」をアップロード
 # ・列は『チーム』『ポジション』『年齢』『年俸』（＋『順位』『選手名』）を想定
 # ・グループ軸：チーム / ポジション のみ
 # ・外れ値除外（IQR）時に除外された選手一覧を表示（年俸付き）
@@ -16,15 +16,15 @@ import streamlit as st
 
 st.set_page_config(page_title="箱ひげ図（J年俸）", layout="wide")
 st.title("Jリーグ年俸データの箱ひげ図アプリ")
-st.caption("Excel『箱ひげ図.xlsx』をアップロードし、チームやポジションごとの年俸分布を確認します。")
+st.caption("Excel『Jリーグ年俸.xlsx』をアップロードし、チームやポジションごとの年俸分布を確認します。")
 
 # -----------------------------
 # サイドバー
 # -----------------------------
 with st.sidebar:
     st.header("1) ファイルの読み込み")
-    st.write("配布した Excel ファイル（箱ひげ図.xlsx）をアップロードしてください。")
-    file = st.file_uploader("箱ひげ図.xlsx を選択", type=["xlsx"])
+    st.write("配布した Excel ファイル（Jリーグ年俸.xlsx）をアップロードしてください。")
+    file = st.file_uploader("Jリーグ年俸.xlsx を選択", type=["xlsx"])
 
     st.header("2) 表示設定")
     group_by = st.selectbox(
